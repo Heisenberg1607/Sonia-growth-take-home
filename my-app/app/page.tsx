@@ -316,6 +316,7 @@ export default function Home() {
   const [processingPostId, setProcessingPostId] = useState<string | null>(null);
   const [processResult, setProcessResult] = useState<ProcessResult | null>(null);
   const [resetting, setResetting] = useState(false);
+  const [seeding, setSeeding] = useState(false);
   const [selectedPost, setSelectedPost] = useState<Post | null>(null);
 
   async function fetchPosts() {
@@ -422,6 +423,13 @@ export default function Home() {
     await processStream(postId);
   };
 
+  async function handleSeed() {
+    setSeeding(true);
+    await fetch("/api/seed");
+    await fetchPosts();
+    setSeeding(false);
+  }
+
   async function handleReset() {
     setResetting(true);
     setProcessResult(null);
@@ -494,9 +502,16 @@ export default function Home() {
         {fetching ? (
           <div className="text-center py-16 text-sm text-gray-400">Loading posts…</div>
         ) : posts.length === 0 ? (
-          <div className="text-center py-16 text-sm text-gray-400">
-            No posts found. Hit{" "}
-            <code className="text-xs bg-gray-100 px-1 py-0.5 rounded">GET /api/seed</code> first.
+          <div className="text-center py-16 flex flex-col items-center gap-4">
+            <p className="text-sm text-gray-400">No posts found. Load sample posts to get started.</p>
+            <button
+              onClick={handleSeed}
+              disabled={seeding}
+              className="rounded-md bg-indigo-600 px-5 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-60 disabled:cursor-not-allowed flex items-center gap-2"
+            >
+              {seeding && <Spinner />}
+              {seeding ? "Loading Posts…" : "Load Sample Posts"}
+            </button>
           </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
