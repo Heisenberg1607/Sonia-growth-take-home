@@ -1,23 +1,26 @@
-import Anthropic from "@anthropic-ai/sdk";
+import OpenAI from "openai";
 
-const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-const MODEL = "claude-sonnet-4-20250514";
+const MODEL = "gpt-4o-mini";
 
 export async function scoreRelevance(post: {
   title: string;
   content: string;
   subreddit: string;
 }): Promise<{ score: number; reasoning: string }> {
-  const response = await client.messages.create({
+  const response = await client.chat.completions.create({
     model: MODEL,
-    max_tokens: 256,
-    system: `You are a relevance scoring engine for Sonia, a general wellness AI companion app that helps people manage their mental health between therapy sessions, find affordable support, and build healthy emotional habits.
+    response_format: { type: "json_object" },
+    messages: [
+      {
+        role: "system",
+        content: `You are a relevance scoring engine for Sonia, a general wellness AI companion app that helps people manage their mental health between therapy sessions, find affordable support, and build healthy emotional habits.
 
 Score Reddit posts on how relevant they are to Sonia's target users (people seeking mental wellness support, affordable therapy alternatives, or tools to manage anxiety/depression/stress).
 
 Respond with valid JSON only. No markdown, no explanation outside the JSON.`,
-    messages: [
+      },
       {
         role: "user",
         content: `Score this Reddit post for relevance to Sonia (1-10).
@@ -37,8 +40,7 @@ Return JSON: {"score": <number 1-10>, "reasoning": "<one sentence>"}`,
     ],
   });
 
-  const text =
-    response.content[0].type === "text" ? response.content[0].text : "";
+  const text = response.choices[0].message.content ?? "";
   return JSON.parse(text);
 }
 
@@ -50,10 +52,13 @@ export async function generateComment(post: {
   is_safe: boolean;
   safety_reason: string | null;
 }> {
-  const response = await client.messages.create({
+  const response = await client.chat.completions.create({
     model: MODEL,
-    max_tokens: 512,
-    system: `You are a safety and comment generation engine for Sonia, a wellness AI companion app.
+    response_format: { type: "json_object" },
+    messages: [
+      {
+        role: "system",
+        content: `You are a safety and comment generation engine for Sonia, a wellness AI companion app.
 
 Your job has two steps:
 1. Check if the post is safe to engage with
@@ -69,7 +74,7 @@ If unsafe: return is_safe: false, comment: null, and a brief safety_reason.
 If safe: generate a warm, specific, human-sounding comment under 3 sentences. Do not mention Sonia unless completely natural. Do not be salesy or promotional.
 
 Respond with valid JSON only. No markdown, no explanation outside the JSON.`,
-    messages: [
+      },
       {
         role: "user",
         content: `Evaluate this post and generate a comment if safe.
@@ -83,7 +88,6 @@ Return JSON:
     ],
   });
 
-  const text =
-    response.content[0].type === "text" ? response.content[0].text : "";
+  const text = response.choices[0].message.content ?? "";
   return JSON.parse(text);
 }

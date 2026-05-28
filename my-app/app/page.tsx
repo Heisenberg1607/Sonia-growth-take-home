@@ -1,64 +1,402 @@
-import Image from "next/image";
+"use client";
+
+import { useEffect, useState } from "react";
+
+type Post = {
+  id: string;
+  subreddit: string;
+  title: string;
+  content: string;
+  author: string;
+  upvotes: number;
+  relevance_score: number | null;
+  safety_flag: string | null;
+  comment_id: number | null;
+  comment_text: string | null;
+  comment_edited_text: string | null;
+  comment_status: "pending" | "approved" | "rejected" | null;
+};
+
+type ProcessResult = {
+  postsProcessed: number;
+  commentsGenerated: number;
+  postsFlagged: number;
+};
+
+type StreamChunk = {
+  post_id: string;
+  title: string;
+  relevance_score: number | null;
+  safety_flag: string | null;
+  comment: string | null;
+  comment_id: number | null;
+  status: "processing" | "scored" | "flagged" | "pending";
+};
+
+function Spinner() {
+  return (
+    <svg className="h-3.5 w-3.5 animate-spin" viewBox="0 0 24 24" fill="none">
+      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+    </svg>
+  );
+}
+
+function RelevanceBadge({ score }: { score: number | null }) {
+  if (score === null) {
+    return (
+      <span className="inline-block rounded px-2 py-0.5 text-xs font-medium bg-gray-100 text-gray-500">
+        Unscored
+      </span>
+    );
+  }
+  const color =
+    score >= 7
+      ? "bg-green-100 text-green-700"
+      : score >= 4
+      ? "bg-yellow-100 text-yellow-700"
+      : "bg-gray-100 text-gray-500";
+  return (
+    <span className={`inline-block rounded px-2 py-0.5 text-xs font-medium ${color}`}>
+      Relevance {score}
+    </span>
+  );
+}
+
+function PostCard({
+  post,
+  isProcessing,
+  onRefresh,
+}: {
+  post: Post;
+  isProcessing: boolean;
+  onRefresh: () => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [editText, setEditText] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const displayComment = post.comment_edited_text ?? post.comment_text ?? "";
+
+  async function handleCommentAction(action: "approve" | "reject" | "edit", text?: string) {
+    if (!post.comment_id) return;
+    setLoading(true);
+    await fetch(`/api/comments/${post.comment_id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action, text }),
+    });
+    setLoading(false);
+    setEditing(false);
+    onRefresh();
+  }
+
+  async function handleDismiss() {
+    setLoading(true);
+    await fetch(`/api/posts/${post.id}`, { method: "PATCH" });
+    setLoading(false);
+    onRefresh();
+  }
+
+  return (
+    <div
+      className={`rounded-lg border bg-white p-4 flex flex-col gap-3 transition-all duration-300 ${
+        isProcessing
+          ? "border-indigo-300 shadow-md shadow-indigo-100 ring-1 ring-indigo-200"
+          : "border-gray-200"
+      }`}
+    >
+      {/* Header */}
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex flex-col gap-1 min-w-0">
+          <span className="text-xs font-semibold text-indigo-600 uppercase tracking-wide">
+            {post.subreddit}
+          </span>
+          <h3 className="text-sm font-semibold text-gray-900 leading-snug">{post.title}</h3>
+        </div>
+        <div className="flex items-center gap-1.5 shrink-0">
+          {isProcessing && <Spinner />}
+          <RelevanceBadge score={post.relevance_score} />
+        </div>
+      </div>
+
+      {/* Content */}
+      <p className="text-xs text-gray-500 leading-relaxed">
+        {post.content.length > 150 ? post.content.slice(0, 150) + "…" : post.content}
+      </p>
+
+      {/* Upvotes */}
+      <div className="text-xs text-gray-400">▲ {post.upvotes} upvotes</div>
+
+      {/* State-specific section */}
+      {isProcessing ? (
+        <div className="rounded bg-indigo-50 px-3 py-2 flex items-center gap-2">
+          <Spinner />
+          <span className="text-xs text-indigo-500">Processing with AI…</span>
+        </div>
+      ) : post.safety_flag ? (
+        <div className="rounded bg-red-50 border border-red-200 p-3 flex items-start justify-between gap-2">
+          <div>
+            <p className="text-xs font-semibold text-red-700 mb-0.5">Safety Flag</p>
+            <p className="text-xs text-red-600">{post.safety_flag}</p>
+          </div>
+          <button
+            onClick={handleDismiss}
+            disabled={loading}
+            className="shrink-0 rounded px-2 py-1 text-xs font-medium bg-red-100 text-red-700 hover:bg-red-200 disabled:opacity-50"
+          >
+            Dismiss
+          </button>
+        </div>
+      ) : post.comment_id === null ? (
+        <div className="rounded bg-gray-50 px-3 py-2">
+          <span className="text-xs text-gray-400">Not yet processed</span>
+        </div>
+      ) : post.comment_status === "approved" ? (
+        <div className="rounded bg-green-50 border border-green-200 p-3">
+          <p className="text-xs font-semibold text-green-700 mb-1">Approved comment</p>
+          <p className="text-xs text-gray-700">{displayComment}</p>
+        </div>
+      ) : post.comment_status === "rejected" ? (
+        <div className="rounded bg-gray-50 border border-gray-200 p-3">
+          <p className="text-xs font-semibold text-gray-500">Comment rejected</p>
+        </div>
+      ) : (
+        /* pending */
+        <div className="flex flex-col gap-2">
+          {editing ? (
+            <>
+              <textarea
+                className="w-full rounded border border-gray-300 p-2 text-xs text-gray-800 resize-none focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                rows={4}
+                value={editText}
+                onChange={(e) => setEditText(e.target.value)}
+              />
+              <div className="flex gap-2">
+                <button
+                  onClick={() => handleCommentAction("edit", editText)}
+                  disabled={loading || !editText.trim()}
+                  className="rounded px-3 py-1 text-xs font-medium bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50"
+                >
+                  Save & Approve
+                </button>
+                <button
+                  onClick={() => setEditing(false)}
+                  disabled={loading}
+                  className="rounded px-3 py-1 text-xs font-medium bg-gray-100 text-gray-600 hover:bg-gray-200 disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="rounded bg-gray-50 border border-gray-200 p-3">
+                <p className="text-xs font-semibold text-gray-500 mb-1">Generated comment</p>
+                <p className="text-xs text-gray-700">{displayComment}</p>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => handleCommentAction("approve")}
+                  disabled={loading}
+                  className="rounded px-3 py-1 text-xs font-medium bg-green-600 text-white hover:bg-green-700 disabled:opacity-50"
+                >
+                  Approve
+                </button>
+                <button
+                  onClick={() => { setEditText(displayComment); setEditing(true); }}
+                  disabled={loading}
+                  className="rounded px-3 py-1 text-xs font-medium bg-yellow-500 text-white hover:bg-yellow-600 disabled:opacity-50"
+                >
+                  Edit
+                </button>
+                <button
+                  onClick={() => handleCommentAction("reject")}
+                  disabled={loading}
+                  className="rounded px-3 py-1 text-xs font-medium bg-red-600 text-white hover:bg-red-700 disabled:opacity-50"
+                >
+                  Reject
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function Home() {
+  const [posts, setPosts] = useState<Post[]>([]);
+  const [fetching, setFetching] = useState(true);
+  const [processing, setProcessing] = useState(false);
+  const [processingPostId, setProcessingPostId] = useState<string | null>(null);
+  const [processResult, setProcessResult] = useState<ProcessResult | null>(null);
+  const [resetting, setResetting] = useState(false);
+
+  async function fetchPosts() {
+    setFetching(true);
+    const res = await fetch("/api/posts");
+    const data = await res.json();
+    setPosts(data.posts ?? []);
+    setFetching(false);
+  }
+
+  useEffect(() => {
+    async function load() {
+      await fetchPosts();
+    }
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function handleProcess() {
+    setProcessing(true);
+    setProcessResult(null);
+
+    const response = await fetch("/api/process", { method: "POST" });
+    if (!response.body) { setProcessing(false); return; }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let postsProcessed = 0;
+    let commentsGenerated = 0;
+    let postsFlagged = 0;
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const parts = buffer.split("\n\n");
+      buffer = parts.pop() ?? "";
+
+      for (const part of parts) {
+        const line = part.trim();
+        if (!line.startsWith("data: ")) continue;
+        const chunk: StreamChunk = JSON.parse(line.slice(6));
+
+        if (chunk.status === "processing") {
+          setProcessingPostId(chunk.post_id);
+        } else {
+          postsProcessed++;
+          if (chunk.status === "flagged") postsFlagged++;
+          if (chunk.status === "pending") commentsGenerated++;
+
+          setProcessingPostId(null);
+          setPosts((prev) =>
+            prev.map((p) =>
+              p.id === chunk.post_id
+                ? {
+                    ...p,
+                    relevance_score: chunk.relevance_score,
+                    safety_flag: chunk.safety_flag,
+                    comment_id: chunk.comment_id,
+                    comment_text: chunk.comment,
+                    comment_edited_text: null,
+                    comment_status: chunk.status === "pending" ? "pending" : null,
+                  }
+                : p
+            )
+          );
+        }
+      }
+    }
+
+    setProcessResult({ postsProcessed, commentsGenerated, postsFlagged });
+    setProcessing(false);
+    setProcessingPostId(null);
+  }
+
+  async function handleReset() {
+    setResetting(true);
+    setProcessResult(null);
+    await fetch("/api/reset", { method: "POST" });
+    setResetting(false);
+    fetchPosts();
+  }
+
+  const stats = {
+    total: posts.length,
+    pending: posts.filter((p) => p.comment_status === "pending").length,
+    approved: posts.filter((p) => p.comment_status === "approved").length,
+    rejected: posts.filter((p) => p.comment_status === "rejected").length,
+    flagged: posts.filter((p) => p.safety_flag !== null).length,
+  };
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
+    <div className="min-h-screen bg-gray-50">
+      {/* Header */}
+      <header className="bg-white border-b border-gray-200 px-6 py-4">
+        <div className="max-w-6xl mx-auto flex items-center justify-between">
+          <div>
+            <h1 className="text-xl font-bold text-gray-900">Sonia Growth Tool</h1>
+            <p className="text-sm text-gray-500">Comment Assist System</p>
+          </div>
+          <div className="flex items-center gap-3">
+            {processResult && (
+              <p className="text-xs text-gray-500">
+                {processResult.postsProcessed} processed · {processResult.commentsGenerated} comments · {processResult.postsFlagged} flagged
+              </p>
+            )}
+            <button
+              onClick={handleReset}
+              disabled={resetting || processing}
+              className="rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-60 disabled:cursor-not-allowed flex items-center gap-2"
             >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
+              {resetting && <Spinner />}
+              {resetting ? "Resetting…" : "Reset Database"}
+            </button>
+            <button
+              onClick={handleProcess}
+              disabled={processing || resetting}
+              className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-60 disabled:cursor-not-allowed flex items-center gap-2"
             >
-              Learning
-            </a>{" "}
-            center.
-          </p>
+              {processing && <Spinner />}
+              {processing ? "Processing…" : "Process Posts with AI"}
+            </button>
+          </div>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+      </header>
+
+      <main className="max-w-6xl mx-auto px-6 py-6 flex flex-col gap-6">
+        {/* Stats bar */}
+        <div className="grid grid-cols-5 gap-4">
+          {[
+            { label: "Total Posts", value: stats.total, color: "text-gray-900" },
+            { label: "Pending Review", value: stats.pending, color: "text-yellow-600" },
+            { label: "Approved", value: stats.approved, color: "text-green-600" },
+            { label: "Rejected", value: stats.rejected, color: "text-red-600" },
+            { label: "Flagged", value: stats.flagged, color: "text-orange-600" },
+          ].map((s) => (
+            <div key={s.label} className="rounded-lg border border-gray-200 bg-white px-4 py-3">
+              <p className="text-xs text-gray-500">{s.label}</p>
+              <p className={`text-2xl font-bold ${s.color}`}>{s.value}</p>
+            </div>
+          ))}
         </div>
+
+        {/* Post grid */}
+        {fetching ? (
+          <div className="text-center py-16 text-sm text-gray-400">Loading posts…</div>
+        ) : posts.length === 0 ? (
+          <div className="text-center py-16 text-sm text-gray-400">
+            No posts found. Hit{" "}
+            <code className="text-xs bg-gray-100 px-1 py-0.5 rounded">GET /api/seed</code> first.
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {posts.map((post) => (
+              <PostCard
+                key={post.id}
+                post={post}
+                isProcessing={processingPostId === post.id}
+                onRefresh={fetchPosts}
+              />
+            ))}
+          </div>
+        )}
       </main>
     </div>
   );
