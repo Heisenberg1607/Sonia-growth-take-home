@@ -25,12 +25,11 @@ type ProcessResult = {
 
 type StreamChunk = {
   post_id: string;
-  title: string;
   relevance_score: number | null;
   safety_flag: string | null;
-  comment: string | null;
+  generated_comment: string | null;
   comment_id: number | null;
-  status: "processing" | "scored" | "flagged" | "pending";
+  status: "processing" | "scored" | "flagged" | "pending" | "low_relevance";
 };
 
 function Spinner() {
@@ -250,12 +249,15 @@ export default function Home() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function handleProcess() {
+  const handleProcess = async () => {
     setProcessing(true);
     setProcessResult(null);
 
     const response = await fetch("/api/process", { method: "POST" });
-    if (!response.body) { setProcessing(false); return; }
+    if (!response.body) {
+      setProcessing(false);
+      return;
+    }
 
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
@@ -269,37 +271,52 @@ export default function Home() {
       if (done) break;
 
       buffer += decoder.decode(value, { stream: true });
-      const parts = buffer.split("\n\n");
-      buffer = parts.pop() ?? "";
+      const events = buffer.split("\n\n");
+      buffer = events.pop() ?? "";
 
-      for (const part of parts) {
-        const line = part.trim();
-        if (!line.startsWith("data: ")) continue;
-        const chunk: StreamChunk = JSON.parse(line.slice(6));
+      for (const eventText of events) {
+        const lines = eventText.split("\n");
 
-        if (chunk.status === "processing") {
-          setProcessingPostId(chunk.post_id);
-        } else {
-          postsProcessed++;
-          if (chunk.status === "flagged") postsFlagged++;
-          if (chunk.status === "pending") commentsGenerated++;
+        for (const line of lines) {
+          if (line.startsWith("data: ")) {
+            try {
+              const data = JSON.parse(line.slice(6)) as StreamChunk | { done: true };
 
-          setProcessingPostId(null);
-          setPosts((prev) =>
-            prev.map((p) =>
-              p.id === chunk.post_id
-                ? {
-                    ...p,
-                    relevance_score: chunk.relevance_score,
-                    safety_flag: chunk.safety_flag,
-                    comment_id: chunk.comment_id,
-                    comment_text: chunk.comment,
-                    comment_edited_text: null,
-                    comment_status: chunk.status === "pending" ? "pending" : null,
-                  }
-                : p
-            )
-          );
+              if ("done" in data && data.done) {
+                setProcessResult({ postsProcessed, commentsGenerated, postsFlagged });
+                setProcessing(false);
+                setProcessingPostId(null);
+                return;
+              }
+
+              if (data.status === "processing") {
+                setProcessingPostId(data.post_id);
+                continue;
+              }
+
+              postsProcessed++;
+              if (data.status === "flagged") postsFlagged++;
+              if (data.status === "pending") commentsGenerated++;
+
+              setPosts((prev) =>
+                prev.map((p) =>
+                  p.id === data.post_id
+                    ? {
+                        ...p,
+                        relevance_score: data.relevance_score,
+                        safety_flag: data.safety_flag,
+                        comment_id: data.comment_id,
+                        comment_text: data.generated_comment,
+                        comment_edited_text: null,
+                        comment_status: data.generated_comment ? "pending" : null,
+                      }
+                    : p
+                )
+              );
+            } catch {
+              // skip malformed chunks
+            }
+          }
         }
       }
     }
@@ -307,7 +324,7 @@ export default function Home() {
     setProcessResult({ postsProcessed, commentsGenerated, postsFlagged });
     setProcessing(false);
     setProcessingPostId(null);
-  }
+  };
 
   async function handleReset() {
     setResetting(true);

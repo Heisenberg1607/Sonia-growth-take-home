@@ -1,6 +1,14 @@
 import OpenAI from "openai";
 
-const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const apiKey = process.env.OPENAI_API_KEY;
+
+if (!apiKey) {
+  console.error("[ai] OPENAI_API_KEY is missing");
+} else {
+  console.log("[ai] OPENAI_API_KEY detected");
+}
+
+const client = new OpenAI({ apiKey });
 
 const MODEL = "gpt-4o-mini";
 

@@ -9,98 +9,74 @@ type DbPost = {
 };
 
 export async function POST() {
-  const posts = db
-    .prepare(
-      "SELECT id, title, content, subreddit FROM posts WHERE relevance_score IS NULL AND safety_flag IS NULL"
-    )
-    .all() as DbPost[];
-
   const encoder = new TextEncoder();
-
   const stream = new ReadableStream({
     async start(controller) {
-      function send(chunk: object) {
-        controller.enqueue(encoder.encode(`data: ${JSON.stringify(chunk)}\n\n`));
-      }
+      try {
+        const posts = db
+          .prepare("SELECT * FROM posts WHERE relevance_score IS NULL AND safety_flag IS NULL")
+          .all() as DbPost[];
 
-      for (const post of posts) {
-        // Notify client this post is now being processed
-        send({
-          post_id: post.id,
-          title: post.title,
-          relevance_score: null,
-          safety_flag: null,
-          comment: null,
-          comment_id: null,
-          status: "processing",
-        });
-
-        const { score } = await scoreRelevance({
-          title: post.title,
-          content: post.content,
-          subreddit: post.subreddit,
-        });
-
-        db.prepare("UPDATE posts SET relevance_score = ? WHERE id = ?").run(score, post.id);
-
-        if (score < 6) {
-          send({
+        for (const post of posts) {
+          const processingChunk = JSON.stringify({
             post_id: post.id,
-            title: post.title,
-            relevance_score: score,
+            relevance_score: null,
             safety_flag: null,
-            comment: null,
+            generated_comment: null,
             comment_id: null,
-            status: "scored",
+            status: "processing",
           });
-          continue;
-        }
+          controller.enqueue(encoder.encode(`data: ${processingChunk}\n\n`));
 
-        const { comment, is_safe, safety_reason } = await generateComment({
-          title: post.title,
-          content: post.content,
-        });
+          const { score } = await scoreRelevance(post);
+          db.prepare("UPDATE posts SET relevance_score = ? WHERE id = ?").run(score, post.id);
 
-        if (!is_safe) {
-          db.prepare("UPDATE posts SET safety_flag = ? WHERE id = ?").run(safety_reason, post.id);
-          send({
+          let commentData: string | null = null;
+          let commentId: number | null = null;
+          let safetyFlag: string | null = null;
+
+          if (score >= 6) {
+            const result = await generateComment(post);
+            if (!result.is_safe) {
+              safetyFlag = result.safety_reason;
+              db.prepare("UPDATE posts SET safety_flag = ? WHERE id = ?").run(safetyFlag, post.id);
+            } else {
+              const insert = db
+                .prepare(
+                  "INSERT INTO comments (post_id, generated_text, is_safe, status) VALUES (?, ?, ?, ?)"
+                )
+                .run(post.id, result.comment, 1, "pending") as { lastInsertRowid: number };
+              commentData = result.comment;
+              commentId = insert.lastInsertRowid;
+            }
+          }
+
+          const chunk = JSON.stringify({
             post_id: post.id,
-            title: post.title,
             relevance_score: score,
-            safety_flag: safety_reason,
-            comment: null,
-            comment_id: null,
-            status: "flagged",
+            safety_flag: safetyFlag,
+            generated_comment: commentData,
+            comment_id: commentId,
+            status: safetyFlag ? "flagged" : score >= 6 ? "pending" : "low_relevance",
           });
-          continue;
+
+          controller.enqueue(encoder.encode(`data: ${chunk}\n\n`));
         }
 
-        const result = db
-          .prepare(
-            "INSERT INTO comments (post_id, generated_text, is_safe, status) VALUES (?, ?, 1, 'pending')"
-          )
-          .run(post.id, comment) as { lastInsertRowid: number };
-
-        send({
-          post_id: post.id,
-          title: post.title,
-          relevance_score: score,
-          safety_flag: null,
-          comment,
-          comment_id: result.lastInsertRowid,
-          status: "pending",
-        });
+        controller.enqueue(encoder.encode('data: {"done": true}\n\n'));
+        controller.close();
+      } catch (error) {
+        controller.error(error);
       }
-
-      controller.close();
     },
   });
 
   return new Response(stream, {
     headers: {
       "Content-Type": "text/event-stream",
-      "Cache-Control": "no-cache",
+      "Cache-Control": "no-cache, no-transform",
       Connection: "keep-alive",
+      "X-Accel-Buffering": "no",
     },
   });
 }
