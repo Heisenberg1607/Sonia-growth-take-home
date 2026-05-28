@@ -1,24 +1,39 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+Sonia Growth Tool — a comment-assist prototype for reviewing Reddit-style posts, scoring relevance, drafting comments, and approving/rejecting drafts.
+
+Built with [Next.js](https://nextjs.org).
+
+## Prerequisites
+
+- Node.js 20+
+- npm
+- An [OpenAI API key](https://platform.openai.com/api-keys)
 
 ## Getting Started
 
-First, run the development server:
+From the `my-app` directory:
+
+```bash
+npm install
+cp .env.local.example .env.local
+```
+
+Edit `.env.local` and set your API key:
+
+```
+OPENAI_API_KEY=your_openai_api_key_here
+```
+
+Start the dev server:
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+On first run, seed the local SQLite database (20 sample posts) by visiting [http://localhost:3000/api/seed](http://localhost:3000/api/seed) in your browser.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+Open [http://localhost:3000](http://localhost:3000) in your browser.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Optional: export all posts, comments, and reviewer decisions at `GET /api/export`.
 
 ## Learn More
 

@@ -9,7 +9,7 @@ This tool helps the Sonia growth team identify relevant Reddit posts and draft t
 ## Architecture
 
 **Tech stack:**
-- Next.js 14 App Router
+- Next.js App Router
 - SQLite via `better-sqlite3` for local storage
 - OpenAI GPT-4o-mini for relevance scoring and comment generation
 - Tailwind CSS for UI
@@ -24,18 +24,21 @@ Post Ingestion → Safety Check → Relevance Scoring → Comment Generation →
 
 ## Setup Instructions
 
+**Prerequisites:** Node.js 20+, npm, and an [OpenAI API key](https://platform.openai.com/api-keys).
+
 1. Clone the repository
    ```bash
    git clone <repo-url>
-   cd "Sonia-growth-take-home "
+   cd "Sonia-growth-take-home"
    ```
 
 2. Install dependencies
    ```bash
+   cd my-app
    npm install
    ```
 
-3. Copy environment variables
+3. Copy environment variables (from the repo root, or run this inside `my-app` as `cp .env.local.example .env.local`)
    ```bash
    cp my-app/.env.local.example my-app/.env.local
    ```
@@ -50,7 +53,7 @@ Post Ingestion → Safety Check → Relevance Scoring → Comment Generation →
 
 6. Open [http://localhost:3000](http://localhost:3000)
 
-7. Click **Seed Database** to load mock posts
+7. On first run, seed mock posts by visiting [http://localhost:3000/api/seed](http://localhost:3000/api/seed) in your browser
 
 8. Click **Process Posts with AI** to run the AI workflow
 
@@ -68,7 +71,7 @@ OPENAI_API_KEY=your_openai_api_key_here
 
 ## How to Use
 
-1. Seed the database with mock posts
+1. Seed the database with mock posts (`GET /api/seed` once the dev server is running)
 2. Click **Process Posts with AI** — posts update in real time as each one is processed
 3. Review generated comments — approve, edit, or reject each one
 4. Flagged posts are shown with a red banner and cannot be approved
