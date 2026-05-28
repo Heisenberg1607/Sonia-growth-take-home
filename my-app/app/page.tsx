@@ -29,7 +29,7 @@ type StreamChunk = {
   safety_flag: string | null;
   generated_comment: string | null;
   comment_id: number | null;
-  status: "processing" | "scored" | "flagged" | "pending" | "low_relevance";
+  status: "processing" | "flagged" | "pending" | "low_relevance";
 };
 
 function Spinner() {
@@ -80,6 +80,7 @@ function PostCard({
   const [editing, setEditing] = useState(false);
   const [editText, setEditText] = useState("");
   const [loading, setLoading] = useState(false);
+  const [regenerating, setRegenerating] = useState(false);
 
   const displayComment = post.comment_edited_text ?? post.comment_text ?? "";
   const canProcessThisPost =
@@ -102,6 +103,14 @@ function PostCard({
     setLoading(true);
     await fetch(`/api/posts/${post.id}`, { method: "PATCH" });
     setLoading(false);
+    onRefresh();
+  }
+
+  async function handleRegenerate() {
+    if (!post.comment_id) return;
+    setRegenerating(true);
+    await fetch(`/api/comments/${post.comment_id}/regenerate`, { method: "POST" });
+    setRegenerating(false);
     onRefresh();
   }
 
@@ -188,13 +197,33 @@ function PostCard({
           <span className="text-xs text-gray-400">Not yet processed</span>
         </div>
       ) : post.comment_status === "approved" ? (
-        <div className="rounded bg-green-50 border border-green-200 p-3">
-          <p className="text-xs font-semibold text-green-700 mb-1">Approved comment</p>
-          <p className="text-xs text-gray-700">{displayComment}</p>
+        <div className="flex flex-col gap-2">
+          <div className="rounded bg-green-50 border border-green-200 p-3">
+            <p className="text-xs font-semibold text-green-700 mb-1">Approved comment</p>
+            <p className="text-xs text-gray-700">{displayComment}</p>
+          </div>
+          <button
+            onClick={(e) => { e.stopPropagation(); handleRegenerate(); }}
+            disabled={regenerating || loading}
+            className="self-start rounded px-3 py-1 text-xs font-medium bg-gray-100 text-gray-600 hover:bg-gray-200 disabled:opacity-50 flex items-center gap-1.5"
+          >
+            {regenerating && <Spinner />}
+            {regenerating ? "Regenerating…" : "Regenerate"}
+          </button>
         </div>
       ) : post.comment_status === "rejected" ? (
-        <div className="rounded bg-gray-50 border border-gray-200 p-3">
-          <p className="text-xs font-semibold text-gray-500">Comment rejected</p>
+        <div className="flex flex-col gap-2">
+          <div className="rounded bg-gray-50 border border-gray-200 p-3">
+            <p className="text-xs font-semibold text-gray-500">Comment rejected</p>
+          </div>
+          <button
+            onClick={(e) => { e.stopPropagation(); handleRegenerate(); }}
+            disabled={regenerating || loading}
+            className="self-start rounded px-3 py-1 text-xs font-medium bg-gray-100 text-gray-600 hover:bg-gray-200 disabled:opacity-50 flex items-center gap-1.5"
+          >
+            {regenerating && <Spinner />}
+            {regenerating ? "Regenerating…" : "Regenerate"}
+          </button>
         </div>
       ) : (
         /* pending */
@@ -257,10 +286,18 @@ function PostCard({
                     e.stopPropagation();
                     handleCommentAction("reject");
                   }}
-                  disabled={loading}
+                  disabled={loading || regenerating}
                   className="rounded px-3 py-1 text-xs font-medium bg-red-600 text-white hover:bg-red-700 disabled:opacity-50"
                 >
                   Reject
+                </button>
+                <button
+                  onClick={(e) => { e.stopPropagation(); handleRegenerate(); }}
+                  disabled={loading || regenerating}
+                  className="rounded px-3 py-1 text-xs font-medium bg-gray-100 text-gray-600 hover:bg-gray-200 disabled:opacity-50 flex items-center gap-1.5"
+                >
+                  {regenerating && <Spinner />}
+                  {regenerating ? "Regenerating…" : "Regenerate"}
                 </button>
               </div>
             </>
@@ -294,7 +331,6 @@ export default function Home() {
       await fetchPosts();
     }
     load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const processStream = async (postId?: string) => {

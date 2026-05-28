@@ -1,5 +1,5 @@
 import db from "@/lib/db";
-import { scoreRelevance, generateComment } from "@/lib/ai";
+import { checkSafety, scoreRelevance, generateComment } from "@/lib/ai";
 
 type DbPost = {
   id: string;
@@ -42,6 +42,21 @@ export async function POST(request: Request) {
           });
           controller.enqueue(encoder.encode(`data: ${processingChunk}\n\n`));
 
+          const safety = await checkSafety(post);
+          if (!safety.is_safe) {
+            db.prepare("UPDATE posts SET safety_flag = ? WHERE id = ?").run(safety.safety_reason, post.id);
+            const unsafeChunk = JSON.stringify({
+              post_id: post.id,
+              relevance_score: null,
+              safety_flag: safety.safety_reason,
+              generated_comment: null,
+              comment_id: null,
+              status: "flagged",
+            });
+            controller.enqueue(encoder.encode(`data: ${unsafeChunk}\n\n`));
+            continue;
+          }
+
           const { score } = await scoreRelevance(post);
           db.prepare("UPDATE posts SET relevance_score = ? WHERE id = ?").run(score, post.id);
 
@@ -51,10 +66,7 @@ export async function POST(request: Request) {
 
           if (score >= 6) {
             const result = await generateComment(post);
-            if (!result.is_safe) {
-              safetyFlag = result.safety_reason;
-              db.prepare("UPDATE posts SET safety_flag = ? WHERE id = ?").run(safetyFlag, post.id);
-            } else {
+            if (result.comment) {
               const insert = db
                 .prepare(
                   "INSERT INTO comments (post_id, generated_text, is_safe, status) VALUES (?, ?, ?, ?)"
@@ -62,6 +74,9 @@ export async function POST(request: Request) {
                 .run(post.id, result.comment, 1, "pending") as { lastInsertRowid: number };
               commentData = result.comment;
               commentId = insert.lastInsertRowid;
+            } else if (result.safety_reason) {
+              safetyFlag = result.safety_reason;
+              db.prepare("UPDATE posts SET safety_flag = ? WHERE id = ?").run(safetyFlag, post.id);
             }
           }
 

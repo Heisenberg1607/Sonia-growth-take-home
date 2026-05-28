@@ -7,7 +7,6 @@ export function seed() {
   };
 
   if (existing.count > 0) {
-    console.log("Database already seeded, skipping.");
     return;
   }
 
@@ -33,5 +32,4 @@ export function seed() {
   });
 
   insertAll();
-  console.log("Database seeded successfully");
 }

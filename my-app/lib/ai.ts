@@ -4,8 +4,6 @@ const apiKey = process.env.OPENAI_API_KEY;
 
 if (!apiKey) {
   console.error("[ai] OPENAI_API_KEY is missing");
-} else {
-  console.log("[ai] OPENAI_API_KEY detected");
 }
 
 const client = new OpenAI({ apiKey });
@@ -23,11 +21,42 @@ export async function scoreRelevance(post: {
     messages: [
       {
         role: "system",
-        content: `You are a relevance scoring engine for Sonia, a general wellness AI companion app that helps people manage their mental health between therapy sessions, find affordable support, and build healthy emotional habits.
+        content: `You are a growth analyst for Sonia, a general wellness AI companion app. Sonia helps people process emotions, feel less alone, and build a relationship with an AI that remembers them over time. Sonia is NOT a medical device and does NOT treat or diagnose conditions.
 
-Score Reddit posts on how relevant they are to Sonia's target users (people seeking mental wellness support, affordable therapy alternatives, or tools to manage anxiety/depression/stress).
+Your job is to score Reddit posts for relevance - meaning: is this a conversation where Sonia could add genuine value if a team member left a thoughtful comment?
 
-Respond with valid JSON only. No markdown, no explanation outside the JSON.`,
+Score 1-10 using these criteria:
+
+HIGH RELEVANCE (score 7-10):
+- Person is seeking emotional support or someone to talk to
+- Person is on a therapy waitlist or can't afford therapy
+- Person is looking for tools or resources between therapy sessions
+- Person is feeling isolated, lonely, or overwhelmed
+- Person is asking about AI or apps for mental health support
+- Person is sharing a struggle and seems open to connection
+
+MEDIUM RELEVANCE (score 4-6):
+- Person is sharing a mental health experience but not actively seeking help
+- General discussion about mental health topics
+- Person is doing okay but reflecting on their journey
+- Post is tangentially related to emotional wellness
+
+LOW RELEVANCE (score 1-3):
+- Post is about medication, diagnosis, or medical treatment
+- Post is completely off topic - fitness, finance, relationships with no emotional component
+- Person seems to be venting with no openness to engagement
+- Post is a news article or academic discussion
+- Person is a professional discussing clinical topics
+
+NEVER score high if:
+- Post contains crisis or self harm content
+- Post appears to be from a minor
+- Post is asking for medical or diagnostic advice
+- Post would require Sonia to make health claims to be relevant
+
+Return JSON only: { score: number, reasoning: string }
+
+The reasoning should be one sentence explaining why you gave that score.`,
       },
       {
         role: "user",
@@ -44,6 +73,42 @@ Scoring guide:
 - 1-2: Unrelated to mental health or wellness
 
 Return JSON: {"score": <number 1-10>, "reasoning": "<one sentence>"}`,
+      },
+    ],
+  });
+
+  const text = response.choices[0].message.content ?? "";
+  return JSON.parse(text);
+}
+
+export async function checkSafety(post: {
+  title: string;
+  content: string;
+}): Promise<{ is_safe: boolean; safety_reason: string | null }> {
+  const response = await client.chat.completions.create({
+    model: MODEL,
+    response_format: { type: "json_object" },
+    messages: [
+      {
+        role: "system",
+        content: `You are a safety classifier for user-generated mental health posts.
+
+Check ONLY for the following safety issues:
+- Crisis or self harm content
+- Mentions of minors
+- Medical diagnosis or medication requests
+- Active crisis language
+
+Return JSON only: { is_safe: boolean, safety_reason: string | null }`,
+      },
+      {
+        role: "user",
+        content: `Classify this post for safety.
+
+Title: ${post.title}
+Content: ${post.content}
+
+Return JSON only: { is_safe: boolean, safety_reason: string | null }`,
       },
     ],
   });
@@ -100,7 +165,17 @@ Safety filter - return is_safe: false if post contains:
 - Asking for medical diagnosis or medication advice
 - Active crisis language
 
-Return JSON only: { comment: string | null, is_safe: boolean, safety_reason: string | null }`,
+Return JSON only: { comment: string | null, is_safe: boolean, safety_reason: string | null }
+
+Additional quality rules:
+- The comment must reference something specific from the post - a word, a situation, a feeling they mentioned. If your comment could apply to any post it is not good enough.
+- Keep it short enough to be a real social media comment - 1-3 sentences maximum. Never write a paragraph.
+- If Sonia is mentioned in the comment it must be transparent and natural - never say "I work at Sonia" or "Sonia is an app" - just mention it the way a real user would mention something that helped them. Example: "Something called Sonia actually helped me a lot with exactly this kind of thing - might be worth a look."
+- Never repeat words from the post back at the person in a way that feels robotic. Paraphrase naturally.
+- The comment should feel like it was written in 30 seconds by someone who genuinely stopped scrolling because this post resonated with them.
+- If you cannot write a comment that feels specific, kind, and human for this post - return null for the comment and explain why in safety_reason.
+
+Final check before returning - ask yourself: would a real person post this comment? If the answer is no, rewrite it.`,
       },
       {
         role: "user",
