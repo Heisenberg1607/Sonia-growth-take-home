@@ -8,14 +8,28 @@ type DbPost = {
   subreddit: string;
 };
 
-export async function POST() {
+export async function POST(request: Request) {
+  let postId: string | null = null;
+  try {
+    const body = (await request.json()) as { post_id?: string };
+    postId = body?.post_id ?? null;
+  } catch {
+    postId = null;
+  }
+
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
     async start(controller) {
       try {
-        const posts = db
-          .prepare("SELECT * FROM posts WHERE relevance_score IS NULL AND safety_flag IS NULL")
-          .all() as DbPost[];
+        const posts = postId
+          ? (db
+              .prepare(
+                "SELECT * FROM posts WHERE id = ? AND relevance_score IS NULL AND safety_flag IS NULL"
+              )
+              .all(postId) as DbPost[])
+          : (db
+              .prepare("SELECT * FROM posts WHERE relevance_score IS NULL AND safety_flag IS NULL")
+              .all() as DbPost[]);
 
         for (const post of posts) {
           const processingChunk = JSON.stringify({

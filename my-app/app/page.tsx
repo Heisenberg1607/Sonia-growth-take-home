@@ -65,17 +65,25 @@ function RelevanceBadge({ score }: { score: number | null }) {
 function PostCard({
   post,
   isProcessing,
+  canProcess,
   onRefresh,
+  onProcess,
+  onOpen,
 }: {
   post: Post;
   isProcessing: boolean;
+  canProcess: boolean;
   onRefresh: () => void;
+  onProcess: (postId: string) => void;
+  onOpen: (post: Post) => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [editText, setEditText] = useState("");
   const [loading, setLoading] = useState(false);
 
   const displayComment = post.comment_edited_text ?? post.comment_text ?? "";
+  const canProcessThisPost =
+    post.relevance_score === null && post.safety_flag === null && post.comment_id === null;
 
   async function handleCommentAction(action: "approve" | "reject" | "edit", text?: string) {
     if (!post.comment_id) return;
@@ -99,11 +107,12 @@ function PostCard({
 
   return (
     <div
+      onClick={() => onOpen(post)}
       className={`rounded-lg border bg-white p-4 flex flex-col gap-3 transition-all duration-300 ${
         isProcessing
           ? "border-indigo-300 shadow-md shadow-indigo-100 ring-1 ring-indigo-200"
           : "border-gray-200"
-      }`}
+      } cursor-pointer`}
     >
       {/* Header */}
       <div className="flex items-start justify-between gap-2">
@@ -114,6 +123,17 @@ function PostCard({
           <h3 className="text-sm font-semibold text-gray-900 leading-snug">{post.title}</h3>
         </div>
         <div className="flex items-center gap-1.5 shrink-0">
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onOpen(post);
+            }}
+            className="rounded px-2 py-0.5 text-xs font-medium text-gray-500 hover:bg-gray-100 hover:text-gray-700"
+            aria-label="Expand post"
+            title="Expand"
+          >
+            Expand
+          </button>
           {isProcessing && <Spinner />}
           <RelevanceBadge score={post.relevance_score} />
         </div>
@@ -125,10 +145,23 @@ function PostCard({
       </p>
 
       {/* Upvotes */}
-      <div className="text-xs text-gray-400">▲ {post.upvotes} upvotes</div>
+      <div className="flex items-center justify-between gap-2">
+        <div className="text-xs text-gray-400">▲ {post.upvotes} upvotes</div>
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onProcess(post.id);
+          }}
+          disabled={!canProcess || !canProcessThisPost || loading}
+          className="rounded px-3 py-1 text-xs font-medium bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50"
+        >
+          Process This Post
+        </button>
+      </div>
 
       {/* State-specific section */}
-      {isProcessing ? (
+      <div onClick={(e) => e.stopPropagation()}>
+        {isProcessing ? (
         <div className="rounded bg-indigo-50 px-3 py-2 flex items-center gap-2">
           <Spinner />
           <span className="text-xs text-indigo-500">Processing with AI…</span>
@@ -140,7 +173,10 @@ function PostCard({
             <p className="text-xs text-red-600">{post.safety_flag}</p>
           </div>
           <button
-            onClick={handleDismiss}
+            onClick={(e) => {
+              e.stopPropagation();
+              handleDismiss();
+            }}
             disabled={loading}
             className="shrink-0 rounded px-2 py-1 text-xs font-medium bg-red-100 text-red-700 hover:bg-red-200 disabled:opacity-50"
           >
@@ -196,21 +232,31 @@ function PostCard({
               </div>
               <div className="flex gap-2">
                 <button
-                  onClick={() => handleCommentAction("approve")}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleCommentAction("approve");
+                  }}
                   disabled={loading}
                   className="rounded px-3 py-1 text-xs font-medium bg-green-600 text-white hover:bg-green-700 disabled:opacity-50"
                 >
                   Approve
                 </button>
                 <button
-                  onClick={() => { setEditText(displayComment); setEditing(true); }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setEditText(displayComment);
+                    setEditing(true);
+                  }}
                   disabled={loading}
                   className="rounded px-3 py-1 text-xs font-medium bg-yellow-500 text-white hover:bg-yellow-600 disabled:opacity-50"
                 >
                   Edit
                 </button>
                 <button
-                  onClick={() => handleCommentAction("reject")}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleCommentAction("reject");
+                  }}
                   disabled={loading}
                   className="rounded px-3 py-1 text-xs font-medium bg-red-600 text-white hover:bg-red-700 disabled:opacity-50"
                 >
@@ -221,6 +267,7 @@ function PostCard({
           )}
         </div>
       )}
+      </div>
     </div>
   );
 }
@@ -232,6 +279,7 @@ export default function Home() {
   const [processingPostId, setProcessingPostId] = useState<string | null>(null);
   const [processResult, setProcessResult] = useState<ProcessResult | null>(null);
   const [resetting, setResetting] = useState(false);
+  const [selectedPost, setSelectedPost] = useState<Post | null>(null);
 
   async function fetchPosts() {
     setFetching(true);
@@ -249,11 +297,15 @@ export default function Home() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const handleProcess = async () => {
+  const processStream = async (postId?: string) => {
     setProcessing(true);
     setProcessResult(null);
 
-    const response = await fetch("/api/process", { method: "POST" });
+    const response = await fetch("/api/process", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(postId ? { post_id: postId } : {}),
+    });
     if (!response.body) {
       setProcessing(false);
       return;
@@ -324,6 +376,14 @@ export default function Home() {
     setProcessResult({ postsProcessed, commentsGenerated, postsFlagged });
     setProcessing(false);
     setProcessingPostId(null);
+  };
+
+  const handleProcess = async () => {
+    await processStream();
+  };
+
+  const handleProcessSingle = async (postId: string) => {
+    await processStream(postId);
   };
 
   async function handleReset() {
@@ -409,12 +469,55 @@ export default function Home() {
                 key={post.id}
                 post={post}
                 isProcessing={processingPostId === post.id}
+                canProcess={!processing && !resetting}
                 onRefresh={fetchPosts}
+                onProcess={handleProcessSingle}
+                onOpen={setSelectedPost}
               />
             ))}
           </div>
         )}
       </main>
+      {selectedPost && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          onClick={() => setSelectedPost(null)}
+        >
+          <div
+            className="w-full max-w-2xl rounded-lg bg-white p-6 shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="mb-4 flex items-start justify-between gap-4">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-wide text-indigo-600">
+                  {selectedPost.subreddit}
+                </p>
+                <h2 className="text-lg font-semibold text-gray-900">{selectedPost.title}</h2>
+              </div>
+              <button
+                onClick={() => setSelectedPost(null)}
+                className="rounded px-2 py-1 text-sm text-gray-500 hover:bg-gray-100"
+              >
+                Close
+              </button>
+            </div>
+            <p className="mb-4 whitespace-pre-wrap text-sm text-gray-700">{selectedPost.content}</p>
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-gray-500">▲ {selectedPost.upvotes} upvotes</span>
+              <button
+                onClick={() => {
+                  handleProcessSingle(selectedPost.id);
+                  setSelectedPost(null);
+                }}
+                disabled={processing || resetting}
+                className="rounded px-3 py-1 text-xs font-medium bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50"
+              >
+                Process This Post
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
